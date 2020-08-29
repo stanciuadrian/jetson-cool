@@ -6,6 +6,12 @@
 
 `/etc/nvpmodel.conf` defines the `nvpmodel`s.
 
+### Cooler
+
+Turn ON (max speed): `sudo sh -c 'echo 255 > /sys/devices/pwm-fan/target_pwm'`
+
+Turn OFF: `sudo sh -c 'echo 0 > /sys/devices/pwm-fan/target_pwm'`
+
 ## Code
 
 [procfs](https://docs.rs/procfs/0.8.0/) crate.
