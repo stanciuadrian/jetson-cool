@@ -21,3 +21,7 @@ Turn OFF: `sudo sh -c 'echo 0 > /sys/devices/pwm-fan/target_pwm'`
 `nvpmodel`: `NV`idia `P`ower `MODEL`
 
 `DVFS`: `D`ynamic `V`oltage and `F`requency `S`caling 
+
+## Links
+
+https://elinux.org/Jetson/Thermal
