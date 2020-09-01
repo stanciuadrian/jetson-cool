@@ -1,26 +1,37 @@
+#![feature(clamp)]
+
 use io::BufReader;
-use std::fs;
-use std::fs::OpenOptions;
-use std::io;
-use std::io::prelude::*;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::io::{self, prelude::*};
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::str;
-use std::{collections::HashMap, thread, time};
+use std::{str, thread, time};
 
-struct Thermal {
+struct ThermalZone {
     name: String,
     enabled: Option<bool>,
-    temp: Option<f64>,
+    temperature: Option<f64>,
 }
 
 struct SystemInfo {
-    temperatures: Vec<Thermal>,
+    temperatures: Vec<ThermalZone>,
+}
+
+impl SystemInfo {
+    fn get_temp(&self, name: &str) -> Option<f64> {
+        self.temperatures
+            .iter()
+            .find(|t| t.name == name && t.enabled.unwrap_or(false) == true)
+            .and_then(|t| t.temperature)
+    }
+    fn get_cpu_temp(&self) -> Option<f64> {
+        self.get_temp("CPU-therm")
+    }
 }
 
 struct Output {
-    pwm: u8,
+    pwm: Option<u8>,
 }
 
 fn read_system_info() -> SystemInfo {
@@ -30,13 +41,15 @@ fn read_system_info() -> SystemInfo {
 }
 
 fn process(system_info: &SystemInfo) -> Output {
-    let cpu_temp = system_info
-        .temperatures
-        .into_iter()
-        .find(|t| t.name == "CPU-therm")
-        .unwrap();
-
-    Output { pwm: 255 }
+    if let Some(cpu_temp) = system_info.get_cpu_temp() {
+        const FAN_OFF_TEMP: f64 = 30.0;
+        const FAN_MAX_TEMP: f64 = 50.0;
+        let spd = 255.0 * (cpu_temp - FAN_OFF_TEMP) / (FAN_MAX_TEMP - FAN_OFF_TEMP);
+        let pwm = spd.clamp(0.0, 255.0) as u8;
+        Output { pwm: Some(pwm) }
+    } else {
+        Output { pwm: None }
+    }
 }
 
 fn set_fan_pwm(pwm: u8) {
@@ -47,10 +60,10 @@ fn set_fan_pwm(pwm: u8) {
         .open("/sys/devices/pwm-fan/target_pwm");
 
     match file {
-        Ok(mut f) => {
+        Ok(mut file) => {
             let mut buf = Vec::with_capacity(3);
             match itoa::write(&mut buf, pwm) {
-                Ok(_) => match f.write_all(&buf) {
+                Ok(_) => match file.write_all(&buf) {
                     Ok(_) => {}
                     Err(_) => {}
                 },
@@ -85,7 +98,7 @@ fn read_file(path: &PathBuf) -> std::io::Result<String> {
     }
 }
 
-fn get_thermal_zone(path_buf: &PathBuf) -> Option<Thermal> {
+fn get_thermal_zone(path_buf: &PathBuf) -> Option<ThermalZone> {
     let name_path = path_buf.join("type");
     match read_file(&name_path) {
         Ok(name) => {
@@ -95,15 +108,15 @@ fn get_thermal_zone(path_buf: &PathBuf) -> Option<Thermal> {
             let enabled = read_file(&mode_path).map(|s| s.trim() == "enabled").ok();
 
             let temp_path = path_buf.join("temp");
-            let temp = read_file(&temp_path)
+            let temperature = read_file(&temp_path)
                 .ok()
-                .and_then(|s| s.parse::<f64>().ok())
+                .and_then(|s| s.trim().parse::<f64>().ok())
                 .map(|s| s / 1000.0);
 
-            let thermal = Thermal {
+            let thermal = ThermalZone {
                 name,
                 enabled,
-                temp,
+                temperature,
             };
 
             Some(thermal)
@@ -112,7 +125,7 @@ fn get_thermal_zone(path_buf: &PathBuf) -> Option<Thermal> {
     }
 }
 
-fn read_temperatures() -> Vec<Thermal> {
+fn read_temperatures() -> Vec<ThermalZone> {
     let mut res = vec![];
     if let Ok(read_dir) = fs::read_dir("/sys/devices/virtual/thermal/") {
         for dir_entry in read_dir {
@@ -136,9 +149,13 @@ fn read_temperatures() -> Vec<Thermal> {
 
 fn main() -> io::Result<()> {
     loop {
-        let input = read_system_info();
-        let output = process(&input);
-        set_fan_pwm(output.pwm);
-        sleep(20);
+        let system_info = read_system_info();
+        let output = process(&system_info);
+        if let Some(pwm) = output.pwm {
+            let cpu_temp = system_info.get_cpu_temp();
+            println!("temp: {:?} pwm: {}", cpu_temp, pwm);
+            set_fan_pwm(pwm);
+        }
+        sleep(5);
     }
 }
