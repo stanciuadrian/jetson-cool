@@ -22,7 +22,7 @@ impl SystemInfo {
     fn get_temp(&self, name: &str) -> Option<f64> {
         self.temperatures
             .iter()
-            .find(|t| t.name == name && t.enabled.unwrap_or(false) == true)
+            .find(|t| t.name == name && t.enabled.unwrap_or(true))
             .and_then(|t| t.temperature)
     }
     fn get_cpu_temp(&self) -> Option<f64> {
@@ -41,15 +41,16 @@ fn read_system_info() -> SystemInfo {
 }
 
 fn process(system_info: &SystemInfo) -> Output {
-    if let Some(cpu_temp) = system_info.get_cpu_temp() {
+    let pwm = if let Some(cpu_temp) = system_info.get_cpu_temp() {
         const FAN_OFF_TEMP: f64 = 30.0;
         const FAN_MAX_TEMP: f64 = 50.0;
-        let spd = 255.0 * (cpu_temp - FAN_OFF_TEMP) / (FAN_MAX_TEMP - FAN_OFF_TEMP);
-        let pwm = spd.clamp(0.0, 255.0) as u8;
-        Output { pwm: Some(pwm) }
+        let spd = (u8::MAX as f64) * (cpu_temp - FAN_OFF_TEMP) / (FAN_MAX_TEMP - FAN_OFF_TEMP);
+        Some(spd.clamp(u8::MIN as f64, u8::MAX as f64) as u8)
     } else {
-        Output { pwm: None }
-    }
+        None
+    };
+
+    Output { pwm }
 }
 
 fn set_fan_pwm(pwm: u8) {
@@ -65,9 +66,13 @@ fn set_fan_pwm(pwm: u8) {
             match itoa::write(&mut buf, pwm) {
                 Ok(_) => match file.write_all(&buf) {
                     Ok(_) => {}
-                    Err(_) => {}
+                    Err(err) => {
+                        println!("{:?}", err);
+                    }
                 },
-                Err(_) => {}
+                Err(err) => {
+                    println!("{:?}", err);
+                }
             }
         }
         Err(err) => {
@@ -121,7 +126,10 @@ fn get_thermal_zone(path_buf: &PathBuf) -> Option<ThermalZone> {
 
             Some(thermal)
         }
-        Err(_) => None,
+        Err(err) => {
+            println!("{:?}", err);
+            None
+        }
     }
 }
 
