@@ -1,6 +1,5 @@
 #![feature(clamp)]
 
-use io::BufReader;
 use std::fs::{self, OpenOptions};
 use std::io::{self, prelude::*, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -37,54 +36,41 @@ impl SystemInfo {
 struct SysFs {}
 
 impl SysFs {
-    fn read_file(path: &PathBuf) -> std::io::Result<String> {
+    fn read_file(path: &PathBuf) -> Option<String> {
         let file = OpenOptions::new()
             .read(true)
             .write(false)
             .create_new(false)
             .open(path);
+        let mut buffer = String::new();
 
-        match file {
-            Ok(inner) => {
-                let mut buf_reader = BufReader::new(inner);
-                let mut buf = String::new();
-                buf_reader.read_to_string(&mut buf)?;
-                Ok(buf)
-            }
-            Err(err) => Err(err),
-        }
+        file.ok()
+            .and_then(|mut f| f.read_to_string(&mut buffer).ok())
+            .map(|_| buffer)
     }
 
     fn get_thermal_zone(path_buf: &PathBuf) -> Option<ThermalZone> {
         let name_path = path_buf.join("type");
-        match Self::read_file(&name_path) {
-            Ok(name) => {
-                let name = name.trim().to_string();
 
-                let mode_path = path_buf.join("mode");
-                let enabled = Self::read_file(&mode_path)
-                    .map(|s| s.trim() == "enabled")
-                    .ok();
+        Self::read_file(&name_path).and_then(|name| {
+            let name = name.trim().to_string();
 
-                let temp_path = path_buf.join("temp");
-                let temperature = Self::read_file(&temp_path)
-                    .ok()
-                    .and_then(|s| s.trim().parse::<f64>().ok())
-                    .map(|s| s / 1000.0);
+            let mode_path = path_buf.join("mode");
+            let enabled = Self::read_file(&mode_path).map(|s| s.trim() == "enabled");
 
-                let thermal = ThermalZone {
-                    name,
-                    enabled,
-                    temperature,
-                };
+            let temp_path = path_buf.join("temp");
+            let temperature = Self::read_file(&temp_path)
+                .and_then(|s| s.trim().parse::<f64>().ok())
+                .map(|s| s / 1000.0);
 
-                Some(thermal)
-            }
-            Err(err) => {
-                println!("{:?}", err);
-                None
-            }
-        }
+            let thermal = ThermalZone {
+                name,
+                enabled,
+                temperature,
+            };
+
+            Some(thermal)
+        })
     }
 
     fn read_temperatures() -> Vec<ThermalZone> {
@@ -111,7 +97,6 @@ impl SysFs {
 
     fn read_gpu_load() -> Option<f64> {
         Self::read_file(&PathBuf::from("/sys/devices/gpu.0/load"))
-            .ok()
             .and_then(|s| s.trim().parse::<f64>().ok())
             .map(|s| s / 10.0)
     }
@@ -123,25 +108,14 @@ impl SysFs {
             .create_new(false)
             .open("/sys/devices/pwm-fan/target_pwm");
 
-        match file {
-            Ok(mut file) => {
-                let mut buf = Vec::with_capacity(3);
-                match itoa::write(&mut buf, pwm) {
-                    Ok(_) => match file.write_all(&buf) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            println!("{:?}", err);
-                        }
-                    },
-                    Err(err) => {
-                        println!("{:?}", err);
-                    }
-                }
-            }
-            Err(err) => {
-                println!("{:?}", err);
-            }
-        }
+        file.and_then(|file| {
+            let mut buf = Vec::with_capacity(3);
+            let _ = itoa::write(&mut buf, pwm);
+            Ok((file, buf))
+        })
+        .and_then(|(mut file, buf)| file.write_all(&buf))
+        .err()
+        .map(|err| println!("{:?}", err));
     }
 }
 

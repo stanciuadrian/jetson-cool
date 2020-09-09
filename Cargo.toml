@@ -1,6 +1,6 @@
 [package]
 name = "jetson-cool"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Adrian Stanciu <stanciu.adrian@gmail.com>"]
 edition = "2018"
 
