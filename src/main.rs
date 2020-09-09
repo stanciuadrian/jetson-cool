@@ -136,16 +136,12 @@ impl PwmCalculator {
     }
 
     fn get_pwm(&self) -> Option<u8> {
-        let max_temp = PwmCalculator::max(self.cpu_temp, self.gpu_temp);
-
-        if let Some(cpu_temp) = max_temp {
-            const FAN_OFF_TEMP: f64 = 30.0;
+        PwmCalculator::max(self.cpu_temp, self.gpu_temp).map(|cpu_temp| {
+            const FAN_OFF_TEMP: f64 = 35.0;
             const FAN_MAX_TEMP: f64 = 50.0;
             let spd = (u8::MAX as f64) * (cpu_temp - FAN_OFF_TEMP) / (FAN_MAX_TEMP - FAN_OFF_TEMP);
-            Some(spd.clamp(u8::MIN as f64, u8::MAX as f64) as u8)
-        } else {
-            None
-        }
+            spd.clamp(u8::MIN as f64, u8::MAX as f64) as u8
+        })
     }
 }
 
@@ -161,12 +157,12 @@ fn main() -> io::Result<()> {
             gpu_temp: system_info.get_gpu_temp(),
         };
         if let Some(pwm) = pwm_calculator.get_pwm() {
-            let cpu_temp = pwm_calculator.cpu_temp.unwrap();
-            let gpu_temp = pwm_calculator.gpu_temp.unwrap();
-            println!(
-                "CPU temp: {:?} GPU temp: {:?} pwm: {}",
-                cpu_temp, gpu_temp, pwm
-            );
+            // let cpu_temp = pwm_calculator.cpu_temp.unwrap();
+            // let gpu_temp = pwm_calculator.gpu_temp.unwrap();
+            // println!(
+            //     "CPU temp: {:?} GPU temp: {:?} pwm: {}",
+            //     cpu_temp, gpu_temp, pwm
+            // );
             SysFs::set_fan_pwm(pwm);
         }
 
