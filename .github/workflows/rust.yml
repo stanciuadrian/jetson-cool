@@ -20,7 +20,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v2      
+      with:
+        rust-version: ${{ matrix.rust }}
     - name: Build
       run: cargo build --verbose
     - name: Run tests
