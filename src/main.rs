@@ -1,7 +1,7 @@
 #![feature(clamp)]
 
 use std::fs::{self, OpenOptions};
-use std::io::{self, prelude::*, Write};
+use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::{str, thread, time};
@@ -36,30 +36,20 @@ impl SystemInfo {
 struct SysFs {}
 
 impl SysFs {
-    fn read_file(path: &PathBuf) -> Option<String> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(false)
-            .create_new(false)
-            .open(path);
-        let mut buffer = String::new();
-
-        file.ok()
-            .and_then(|mut f| f.read_to_string(&mut buffer).ok())
-            .map(|_| buffer)
-    }
-
     fn get_thermal_zone(path_buf: &PathBuf) -> Option<ThermalZone> {
         let name_path = path_buf.join("type");
 
-        Self::read_file(&name_path).and_then(|name| {
+        fs::read_to_string(&name_path).ok().and_then(|name| {
             let name = name.trim().to_string();
 
             let mode_path = path_buf.join("mode");
-            let enabled = Self::read_file(&mode_path).map(|s| s.trim() == "enabled");
+            let enabled = fs::read_to_string(&mode_path)
+                .ok()
+                .map(|s| s.trim() == "enabled");
 
             let temp_path = path_buf.join("temp");
-            let temperature = Self::read_file(&temp_path)
+            let temperature = fs::read_to_string(&temp_path)
+                .ok()
                 .and_then(|s| s.trim().parse::<f64>().ok())
                 .map(|s| s / 1000.0);
 
@@ -96,7 +86,8 @@ impl SysFs {
     }
 
     fn read_gpu_load() -> Option<f64> {
-        Self::read_file(&PathBuf::from("/sys/devices/gpu.0/load"))
+        fs::read_to_string(&PathBuf::from("/sys/devices/gpu.0/load"))
+            .ok()
             .and_then(|s| s.trim().parse::<f64>().ok())
             .map(|s| s / 10.0)
     }
