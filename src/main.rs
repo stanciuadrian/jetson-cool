@@ -33,34 +33,32 @@ impl SystemInfo {
     }
 }
 
-struct SysFs {}
+struct SysFs;
 
 impl SysFs {
-    fn get_thermal_zone(path_buf: &PathBuf) -> Option<ThermalZone> {
+    fn get_thermal_zone(path_buf: &PathBuf) -> io::Result<Option<ThermalZone>> {
         let name_path = path_buf.join("type");
+        let name = fs::read_to_string(&name_path)?;
+        let name = name.trim().to_string();
 
-        fs::read_to_string(&name_path).ok().and_then(|name| {
-            let name = name.trim().to_string();
+        let mode_path = path_buf.join("mode");
+        let enabled = fs::read_to_string(&mode_path)
+            .ok()
+            .map(|s| s.trim() == "enabled");
 
-            let mode_path = path_buf.join("mode");
-            let enabled = fs::read_to_string(&mode_path)
-                .ok()
-                .map(|s| s.trim() == "enabled");
+        let temp_path = path_buf.join("temp");
+        let temperature = fs::read_to_string(&temp_path)
+            .ok()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .map(|s| s / 1000.0);
 
-            let temp_path = path_buf.join("temp");
-            let temperature = fs::read_to_string(&temp_path)
-                .ok()
-                .and_then(|s| s.trim().parse::<f64>().ok())
-                .map(|s| s / 1000.0);
+        let thermal = ThermalZone {
+            name,
+            enabled,
+            temperature,
+        };
 
-            let thermal = ThermalZone {
-                name,
-                enabled,
-                temperature,
-            };
-
-            Some(thermal)
-        })
+        Ok(Some(thermal))
     }
 
     fn read_temperatures() -> Vec<ThermalZone> {
@@ -70,11 +68,8 @@ impl SysFs {
                 if let Ok(dir_entry) = dir_entry {
                     let path_buf = dir_entry.path();
                     if let Some(file) = path_buf.file_name() {
-                        if str::from_utf8(file.as_bytes())
-                            .unwrap()
-                            .starts_with("thermal_zone")
-                        {
-                            if let Some(thermal) = Self::get_thermal_zone(&path_buf) {
+                        if file.as_bytes().starts_with(b"thermal_zone") {
+                            if let Ok(Some(thermal)) = Self::get_thermal_zone(&path_buf) {
                                 res.push(thermal);
                             }
                         }
@@ -92,21 +87,13 @@ impl SysFs {
             .map(|s| s / 10.0)
     }
 
-    fn set_fan_pwm(pwm: u8) {
-        let file = OpenOptions::new()
+    fn set_fan_pwm(pwm: u8) -> io::Result<()> {
+        let mut file = OpenOptions::new()
             .read(false)
             .write(true)
             .create_new(false)
-            .open("/sys/devices/pwm-fan/target_pwm");
-
-        file.and_then(|file| {
-            let mut buf = Vec::with_capacity(3);
-            let _ = itoa::write(&mut buf, pwm);
-            Ok((file, buf))
-        })
-        .and_then(|(mut file, buf)| file.write_all(&buf))
-        .err()
-        .map(|err| println!("{:?}", err));
+            .open("/sys/devices/pwm-fan/target_pwm")?;
+        write!(file, "{}", pwm)
     }
 }
 
@@ -117,12 +104,11 @@ struct PwmCalculator {
 
 impl PwmCalculator {
     fn max(o1: Option<f64>, o2: Option<f64>) -> Option<f64> {
-        match o1 {
-            Some(f1) => match o2 {
-                Some(f2) => Some(f1.max(f2)),
-                None => o1,
-            },
-            None => o2,
+        match (o1, o2) {
+            (Some(f1), Some(f2)) => Some(f1.max(f2)),
+            (Some(f1), _) => Some(f1),
+            (_, Some(f2)) => Some(f2),
+            _ => None,
         }
     }
 
@@ -154,7 +140,9 @@ fn main() -> io::Result<()> {
             //     "CPU temp: {:?} GPU temp: {:?} pwm: {}",
             //     cpu_temp, gpu_temp, pwm
             // );
-            SysFs::set_fan_pwm(pwm);
+            if let Err(e) = SysFs::set_fan_pwm(pwm) {
+                eprintln!("error setting fan speed: {}", e);
+            }
         }
 
         thread::sleep(time::Duration::from_secs(5));
